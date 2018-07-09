@@ -1,0 +1,52 @@
+#!/usr/bin/env python
+import os
+
+HOSTAPD_BUILD_PATH = './hostapd-eaphammer/hostapd'
+
+def read_deps_file(deps_file):
+    with open(deps_file) as fd:
+        return ' '.join([ line.strip() for line in fd ])
+
+if __name__ == '__main__':
+
+    while True:
+
+        print '[*] Please select one of the following build targets:'
+        print '---> (1) RHEL/Centos/Fedora'
+        print '---> (2) Debian/Kali'
+        print
+        choice = raw_input('Enter 1 or 2: ')
+        if choice in ['1', '2']:
+            break
+    build_target = 'redhat' if choice == '1' else 'deb'
+
+    if build_target == 'redhat':
+        if raw_input('Do you want upgrade your installed packages ("dnf upgrade")(recommended)? [y/N]: ').lower() == 'y':
+            os.system('dnf upgrade')
+        print '\n[*] complete!\n'
+
+    else:
+        if raw_input('Do you want update your package list ("apt -y update")(recommended)? [y/N]: ').lower() == 'y':
+            os.system('apt -y update')
+        print '\n[*] complete!\n'
+
+        if raw_input('Do you want upgrade your installed packages ("apt -y upgrade")(recommended)? [y/N]: ').lower() == 'y':
+            os.system('apt -y upgrade')
+        print '\n[*] complete!\n'
+
+
+    print '\n[*] Installing build dependencies...\n'
+    if build_target == 'redhat':
+        os.system('dnf install %s' % read_deps_file('./build-deps/redhat.txt'))
+    else:
+        os.system('apt -y install %s' % read_deps_file('./build-deps/deb.txt'))
+    print '\n[*] complete!\n'
+
+    print '\n[*] Installing Python dependencies...\n'
+    os.system('pip install -r requirements.txt')
+    print '\n[*] complete!\n'
+
+
+    print '\n[*] Compiling hostapd...\n'
+    os.system("cd %s && make hostapd-eaphammer_lib" % HOSTAPD_BUILD_PATH)
+    print '\n[*] complete!\n'
