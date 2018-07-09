@@ -6,7 +6,6 @@ import sys
 
 import core.utils
 import core.firewalls
-import core.servers
 import core.analyzer
 import core.injector
 import core.core_config
