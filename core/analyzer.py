@@ -9,6 +9,7 @@ def encode_eap_hash(s):
 
 def analyze_filter(pkt):
 
+
     if pkt.haslayer(EAP):
 
         eap_type = pkt[EAP].type
@@ -29,7 +30,7 @@ def analyze_filter(pkt):
 
             if pkt[EAP].code == 0x1:
 
-                challenge = pkt[EAP].load[1:17].encode('hex')
+                challenge = pkt[EAP].value.encode('hex')
                 print '[+] EAP-MD5 Authentication Detected'
                 print ' |'
                 print ' ---| MD5 Request ID |-->', eap_id
@@ -40,11 +41,13 @@ def analyze_filter(pkt):
 
             if pkt[EAP].code == 0x2:
             
-                response = pkt[EAP].load[1:17].encode('hex')
+
+                response = pkt[EAP].value.encode('hex')
                 print ' |'
                 print ' ---| MD5 Response   |-->', encode_eap_hash(response)
                 print
                 EAP_MD5_ITEMS[eap_id]['response'] = response
+
 
         elif pkt[EAP].type == 25:
             print '[*] EAP type found: EAP-PEAP'
