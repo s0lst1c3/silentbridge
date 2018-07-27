@@ -48,6 +48,20 @@ def analyze_filter(pkt):
                 print
                 EAP_MD5_ITEMS[eap_id]['response'] = response
 
+        elif pkt[EAP].type == 17:
+            print '[*] EAP type found: EAP-LEAP'
+            print '[*] Suggested attack: rogue gateway'
+
+        elif pkt[EAP].type == 21:
+            print '[*] EAP type found: EAP-FAST'
+            print '[*] Suggested attack: rogue gateway'
+
+        elif pkt[EAP].type == 32:
+            print '[*] EAP type found: EAP-POTP'
+            print '[*] Find another device to attack...'
+
+        elif pkt[EAP].type == 47:
+            print '[*] EAP type found: EAP-PSK'
 
         elif pkt[EAP].type == 25:
             print '[*] EAP type found: EAP-PEAP'

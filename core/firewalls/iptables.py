@@ -19,6 +19,7 @@ def flush():
 
 def allow_outbound(iface, port=22):
     os.system('iptables -A OUTPUT -o %s -p tcp --dport %d -j ACCEPT' % (iface, port))
+    os.system('iptables -I INPUT -i %s -m state --state ESTABLISHED,RELATED -j ACCEPT' % (iface))
 
 def default_accept():
     os.system('iptables -P INPUT ACCEPT')

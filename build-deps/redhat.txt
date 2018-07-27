@@ -3,3 +3,6 @@ dnsmasq
 openssl-devel
 libnfnetlink-devel
 libnl3-devel
+macchanger
+arptables
+ebtables

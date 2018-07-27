@@ -42,6 +42,11 @@ def options():
                         action='store_true',
                         help='Perform Rogue Gateway attack.')
 
+    modes_group_.add_argument('--add-interaction',
+                        dest='add_interaction',
+                        action='store_true',
+                        help='Add interaction to bridge-based bypass.')
+
     modes_group_.add_argument('--cert-wizard',
                         dest='cert_wizard',
                         action='store_true',
@@ -94,6 +99,11 @@ def options():
                         dest='switch_ip',
                         type=str,
                         help='IP address of upstream switch.')
+
+    spoofing_params.add_argument('--gw-ip',
+                        dest='gw_ip',
+                        type=str,
+                        help='IP address of the upstream gateway.')
 
     spoofing_params.add_argument('--netmask',
                         dest='netmask',
@@ -183,12 +193,21 @@ def options():
     missing_nec_params = any([
         args.phy is None,
         args.upstream is None,
-        args.client_mac is None,
-        args.switch_mac is None,
         args.sidechannel is None,
     ])
     if args.create_bridge and missing_nec_params:
-        parser.error("--create-bridge requires the --phy, --sidechannel, --upstream, --client-mac, and --switch-mac flags")
+        parser.error("--create-bridge requires the --phy, --sidechannel, and --upstream flags")
+
+    missing_nec_params = any([
+        args.phy is None,
+        args.upstream is None,
+        args.sidechannel is None,
+        args.client_mac is None,
+        args.client_ip is None,
+        args.gw_mac is None,
+    ])
+    if args.add_interaction and missing_nec_params:
+        parser.error("--add-interaction requires the --phy, --sidechannel, --upstream, --client-mac, --client-ip, and --gw-mac flags")
 
     missing_nec_params = any([
         args.upstream is None,
@@ -211,6 +230,7 @@ def options():
         args.netmask is None,
         args.client_ip is None,
         args.wired_conf is None,
+        args.gw_ip is None,
     ])
     if args.bait_n_switch and missing_nec_params:
         parser.error("--bait-n-switch requires --client-mac, --upstream, --client-ip, --netmask --wired-conf")
@@ -242,6 +262,7 @@ def options():
         args.bridge_down,
         args.discovery,
         args.splitterctl,
+        args.add_interaction,
     ])
     if no_mode_selected:
         parser.error('You must select a valid mode.')

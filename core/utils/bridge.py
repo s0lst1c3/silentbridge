@@ -11,9 +11,6 @@ class Bridge(object):
     def create(self):
 
         os.system('brctl addbr %s' % self.name)
-        if self.mac is not None:
-            os.system('ifconfig %s hw ether %s' % (self.name, self.mac))
-            time.sleep(2)
         time.sleep(.5)
 
     def remove(self):
@@ -27,7 +24,7 @@ class Bridge(object):
 
             os.system('ifconfig %s down' % iface)
             time.sleep(2)
-            os.system('ifconfig %s hw ether %s' % (iface, mac))
+            os.system('macchanger -m %s %s' % (mac, iface))
             time.sleep(2)
 
         os.system('brctl addif %s %s' % (self.name, iface))
@@ -58,6 +55,9 @@ class Bridge(object):
 
     def up(self, bridge_ip):
 
+        if self.mac is not None:
+            os.system('macchanger -m %s %s' % (self.mac, self.name))
+            time.sleep(2)
         os.system('ifconfig %s %s up promisc' % (self.name, bridge_ip))
 
     def down(self):
