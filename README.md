@@ -30,4 +30,12 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 This project is licensed under the GNU Public License 3.0 - see the [LICENSE.md](LICENSE.md) file for details.
 
 ## Acknowledgments
-LATERMAKELIST
+This tool either builds upon, is inspired by, or directly incorporates over ten years of prior research and development from the following awesome people:
+
+- [Steve Riley - Hub-based 802.1x-2004 bypass](https://blogs.technet.microsoft.com/steriley/2005/08/11/august-article-802-1x-on-wired-networks-considered-harmful/)
+- [Alva Duckwall - Bridge-based 802.1x-2004 bypass](https://www.defcon.org/images/defcon-19/dc-19-presentations/Duckwall/DEFCON-19-Duckwall-Bridge-Too-Far.pdf)
+- [Abb - Tap-based 802.1x-2004 bypass](https://www.gremwell.com/marvin-mitm-tapping-dot1x-links)
+- [Valerian Legrand - Injection-based 802.1x-2004 bypass](https://hackinparis.com/data/slides/2017/2017_Legrand_Valerian_802.1x_Network_Access_Control_and_Bypass_Techniques.pdf)
+- [Josh Wright and Brad Antoniewicz - Attacks Against Weak EAP Methods](http://www.willhackforsushi.com/presentations/PEAP_Shmoocon2008_Wright_Antoniewicz.pdf)
+- [Dom White and Ian de Villier - More Attacks Against Weak EAP Methods](https://sensepost.com/blog/2015/improvements-in-rogue-ap-attacks-mana-1%2F2/)
+- [Moxie Marlinspike and David Hulton - Attacks Against MS-CHAPv2](http://web.archive.org/web/20160203043946/https:/www.cloudcracker.com/blog/2012/07/29/cracking-ms-chap-v2/)
