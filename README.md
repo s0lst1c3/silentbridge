@@ -5,7 +5,7 @@ by Gabriel Ryan ([@s0lst1c3](https://twitter.com/s0lst1c3)) @ Digital Silence (i
 
 ## Overview
 
-Silentbridge is a toolkit for quickly bypassing 802.1x port security first presented at DEF CON 26. It improves upon existing techniques for bypassing 802.1x-2004, and some new techniques for attacking both 802.1x-2004 and 802.1x-2010 via their authentication process.
+Silentbridge is a toolkit for quickly bypassing 802.1x port security first presented at DEF CON 26. It provides the first documented means of bypassing 802.1x-2010 via its authentication process, as well as improvements to existing techniques for bypassing 802.1x-2004.
 
 You can check out the accompanying PowerPoint slides, blog, and whitepaper at [https://digitalsilence.com/blog](https://digitalsilence.com/blog). A link to the recorded talk will be added to the blog post when made available by DEF CON.
 
@@ -39,3 +39,5 @@ This tool either builds upon, is inspired by, or directly incorporates over ten 
 - [Josh Wright and Brad Antoniewicz - Attacks Against Weak EAP Methods](http://www.willhackforsushi.com/presentations/PEAP_Shmoocon2008_Wright_Antoniewicz.pdf)
 - [Dom White and Ian de Villier - More Attacks Against Weak EAP Methods](https://sensepost.com/blog/2015/improvements-in-rogue-ap-attacks-mana-1%2F2/)
 - [Moxie Marlinspike and David Hulton - Attacks Against MS-CHAPv2](http://web.archive.org/web/20160203043946/https:/www.cloudcracker.com/blog/2012/07/29/cracking-ms-chap-v2/)
+
+Additional thanks to [@LargeCardinal](https://twitter.com/LargeCardinal) for convincing me to actually follow through with this idea. 
